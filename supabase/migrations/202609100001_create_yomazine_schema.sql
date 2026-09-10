@@ -5,7 +5,7 @@ create table public.magazines (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
   video_id text not null check (video_id ~ '^[A-Za-z0-9_-]{11}$'),
-  video_url text not null check (video_url ~ '^https://www\\.youtube\\.com/watch\\?v=[A-Za-z0-9_-]{11}$'),
+  video_url text not null check (video_url ~ '^https://www\.youtube\.com/watch\?v=[A-Za-z0-9_-]{11}$'),
   video_title text not null check (char_length(btrim(video_title)) > 0),
   channel_title text not null check (char_length(btrim(channel_title)) > 0),
   video_duration_seconds integer not null check (video_duration_seconds between 1 and 3600),
