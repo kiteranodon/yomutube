@@ -12,7 +12,7 @@ const sampleVideo = {
   thumbnail: "YT",
 };
 
-const article = {
+const sampleArticle = {
   title: "変化は、いつも小さな習慣から。",
   lead: "大きな目標を掲げる前に、今日の行動をほんの少し変えてみる。続けるための工夫は、意志の強さよりも、始めやすい環境にありました。",
   keyPoints: ["最初の一歩は、2分で終わるほど小さくする。", "続けたい行動は、すでにある習慣の直後に置く。", "できた日を数えるより、また始められる仕組みをつくる。"],
@@ -25,10 +25,6 @@ const article = {
 
 const generationSteps = ["動画を読んでいます", "記事を編集中", "雑誌を組版中"];
 const wait = (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
-
-function toStoredArticle() {
-  return { magazineTitle: article.title, lead: article.lead, keyPoints: article.keyPoints, memorableMoment: article.memorableMoment, episode: article.episode, discovery: article.discovery, practicalPoints: article.practicalPoints, closing: article.closing };
-}
 
 function formatSaved(minutes, durationSeconds = sampleVideo.minutes * 60) { return Math.max(0, Math.ceil(durationSeconds / 60) - minutes); }
 
@@ -47,6 +43,7 @@ export default function Home() {
   const [authError, setAuthError] = useState("");
   const [generationError, setGenerationError] = useState("");
   const [currentMagazineId, setCurrentMagazineId] = useState(null);
+  const [currentArticle, setCurrentArticle] = useState(null);
   const [history, setHistory] = useState([]);
   const [historyState, setHistoryState] = useState("idle");
   const [historyError, setHistoryError] = useState("");
@@ -139,29 +136,24 @@ export default function Home() {
     }
     setGenerationError(""); setProgress(0); setScreen("generating");
     try {
-      let saveRequest;
-      if (isRegeneration) {
-        if (!currentMagazineId) throw new Error("保存先の雑誌が見つかりません。");
-        saveRequest = requestApi("/api/magazines/" + currentMagazineId + "/regenerate", { method: "POST", body: JSON.stringify({ article: toStoredArticle() }) });
-      } else {
-        if (!videoInfo) throw new Error("動画を確認してから雑誌を作成してください。");
-        saveRequest = requestApi("/api/magazines", {
-          method: "POST",
-          body: JSON.stringify({
-            videoId: videoInfo.videoId,
-            videoUrl: videoInfo.normalizedUrl,
-            videoTitle: videoInfo.title,
-            channelTitle: videoInfo.channelTitle,
-            videoDurationSeconds: videoInfo.durationSeconds,
-            readingMinutes,
-            userGoal: goal,
-            termsVersion: "v1.0",
-            article: toStoredArticle(),
-          }),
-        });
-      }
+      if (!videoInfo) throw new Error("動画を確認してから雑誌を作成してください。");
+      if (isRegeneration && !currentMagazineId) throw new Error("保存先の雑誌が見つかりません。");
+      const saveRequest = requestApi("/api/magazines/generate", {
+        method: "POST",
+        body: JSON.stringify({
+          videoId: videoInfo.videoId,
+          videoUrl: videoInfo.normalizedUrl,
+          videoTitle: videoInfo.title,
+          channelTitle: videoInfo.channelTitle,
+          videoDurationSeconds: videoInfo.durationSeconds,
+          userGoal: goal,
+          readingMinutes,
+          ...(isRegeneration ? { magazineId: currentMagazineId } : {}),
+        }),
+      });
       const [saved] = await Promise.all([saveRequest, wait(2200)]);
       if (!isRegeneration) setCurrentMagazineId(saved.magazine.id);
+      setCurrentArticle(saved.article);
       setScreen("preview");
     } catch (error) {
       setGenerationError(error.message || "履歴を保存できませんでした。");
@@ -196,7 +188,7 @@ export default function Home() {
 
   function resetToCreate() {
     setScreen("create"); setVideoConfirmed(false); setVideoUrl(""); setGoal(""); setAgreed(false);
-    setVideoInfo(null); setVideoCheckState("idle"); setUrlError(""); setGenerationError(""); setCurrentMagazineId(null);
+    setVideoInfo(null); setVideoCheckState("idle"); setUrlError(""); setGenerationError(""); setCurrentMagazineId(null); setCurrentArticle(null);
   }
 
   return <main className={styles.app}>
@@ -204,7 +196,7 @@ export default function Home() {
     {screen === "top" && <Landing onStart={() => setScreen("create")} />}
     {screen === "create" && <CreateMagazine videoUrl={videoUrl} videoInfo={videoInfo} videoConfirmed={videoConfirmed} videoCheckState={videoCheckState} urlError={urlError} goal={goal} readingMinutes={readingMinutes} agreed={agreed} generationError={generationError} authState={authState} authError={authError} onUrlChange={handleUrlChange} onConfirm={confirmVideo} onGoalChange={setGoal} onReadingMinutesChange={setReadingMinutes} onAgreedChange={setAgreed} onGenerate={() => startGeneration(false)} />}
     {screen === "generating" && <Generating progress={progress} />}
-    {screen === "preview" && <Preview readingMinutes={readingMinutes} videoInfo={videoInfo} generationError={generationError} onRegenerate={() => startGeneration(true)} onCreatePdf={() => setScreen("complete")} />}
+    {screen === "preview" && <Preview articleData={currentArticle} readingMinutes={readingMinutes} videoInfo={videoInfo} generationError={generationError} onRegenerate={() => startGeneration(true)} onCreatePdf={() => setScreen("complete")} />}
     {screen === "complete" && <Complete onCreateAnother={resetToCreate} onHistory={openHistory} />}
     {screen === "history" && <History items={history} status={historyState} error={historyError} onReload={loadHistory} onDelete={deleteMagazine} onCreate={() => setScreen("create")} />}
   </main>;
@@ -242,21 +234,31 @@ function Generating({ progress }) {
   return <section className={styles.generating + " " + styles.enter} aria-live="polite"><div className={styles.loadingMark} aria-hidden="true"><span /></div><p className={styles.eyebrow}>CREATING YOUR MAGAZINE</p><h1>雑誌を編集中です。</h1><p>少しだけお待ちください。動画・音声・字幕は保存しません。</p><ol className={styles.generationList}>{generationSteps.map((step, index) => <li className={index <= progress ? styles.doneStep : ""} key={step}><span>{index < progress ? "✓" : index + 1}</span>{step}</li>)}</ol><small>生成には数十秒かかることがあります。</small></section>;
 }
 
-function Preview({ readingMinutes, videoInfo, generationError, onRegenerate, onCreatePdf }) {
+function Preview({ articleData, readingMinutes, videoInfo, generationError, onRegenerate, onCreatePdf }) {
+  const article = articleData || {
+    magazineTitle: sampleArticle.title,
+    lead: sampleArticle.lead,
+    keyPoints: sampleArticle.keyPoints,
+    memorableMoment: sampleArticle.memorableMoment,
+    episode: sampleArticle.episode,
+    discovery: sampleArticle.discovery,
+    practicalPoints: sampleArticle.practicalPoints,
+    closing: sampleArticle.closing,
+  };
   const durationSeconds = videoInfo?.durationSeconds || sampleVideo.minutes * 60;
   const durationLabel = videoInfo?.durationLabel || `${sampleVideo.minutes}分`;
   const channelTitle = videoInfo?.channelTitle || sampleVideo.channel;
   const saved = formatSaved(readingMinutes, durationSeconds);
   return <section className={styles.preview + " " + styles.enter}>
     {generationError && <p className={styles.error} role="alert">{generationError}</p>}
-    <div className={styles.previewHero}><div className={styles.previewCover}><span>YOMAZINE / 001</span><div /><h2>小さな<br />習慣の<br />つくりかた。</h2><p>{channelTitle}</p></div><div className={styles.summary}><p className={styles.eyebrow}>PREVIEW</p><h1>{article.title}</h1><p className={styles.lead}>{article.lead}</p><ol className={styles.keyPoints}>{article.keyPoints.map((point, index) => <li key={point}><span>0{index + 1}</span>{point}</li>)}</ol><div className={styles.timeCard}><p>動画 <strong>{durationLabel}</strong> <span>→</span> 読書 約<strong>{readingMinutes}分</strong></p>{saved > 0 && <p><strong>{saved}分</strong>短縮できました</p>}</div></div></div>
-    <article className={styles.article}><p className={styles.eyebrow}>FULL ARTICLE</p><h2>{article.title}</h2><p className={styles.articleLead}>{article.lead}</p><section><h3>印象に残ったこと</h3><blockquote>{article.memorableMoment}</blockquote></section><section><h3>小さな準備から始める</h3><p>{article.episode}</p></section><section><h3>続けられる景色をつくる</h3><p>{article.discovery}</p></section><section><h3>明日からの実践ポイント</h3><ul>{article.practicalPoints.map((point) => <li key={point}>{point}</li>)}</ul></section><section><h3>おわりに</h3><p>{article.closing}</p></section></article>
+    <div className={styles.previewHero}><div className={styles.previewCover}><span>YOMAZINE / 001</span><div /><h2>{article.magazineTitle}</h2><p>{channelTitle}</p></div><div className={styles.summary}><p className={styles.eyebrow}>PREVIEW</p><h1>{article.magazineTitle}</h1><p className={styles.lead}>{article.lead}</p><ol className={styles.keyPoints}>{article.keyPoints.map((point, index) => <li key={point}><span>0{index + 1}</span>{point}</li>)}</ol><div className={styles.timeCard}><p>動画 <strong>{durationLabel}</strong> <span>→</span> 読書 約<strong>{readingMinutes}分</strong></p>{saved > 0 && <p><strong>{saved}分</strong>短縮できました</p>}</div></div></div>
+    <article className={styles.article}><p className={styles.eyebrow}>FULL ARTICLE</p><h2>{article.magazineTitle}</h2><p className={styles.articleLead}>{article.lead}</p><section><h3>印象に残ったこと</h3><blockquote>{article.memorableMoment}</blockquote></section><section><h3>小さな準備から始める</h3><p>{article.episode}</p></section><section><h3>続けられる景色をつくる</h3><p>{article.discovery}</p></section><section><h3>明日からの実践ポイント</h3><ul>{article.practicalPoints.map((point) => <li key={point}>{point}</li>)}</ul></section><section><h3>おわりに</h3><p>{article.closing}</p></section></article>
     <div className={styles.previewActions}><button className={styles.secondaryButton} onClick={onRegenerate} type="button">もう一度生成する</button><button className={styles.primaryButton} onClick={onCreatePdf} type="button">この内容でPDFを作る <span aria-hidden="true">→</span></button></div>
   </section>;
 }
 
 function Complete({ onCreateAnother, onHistory }) {
-  return <section className={styles.complete + " " + styles.enter}><div className={styles.completeMark} aria-hidden="true">✓</div><p className={styles.eyebrow}>YOUR MAGAZINE IS READY</p><h1>雑誌ができました。</h1><p>PDFのダウンロードを開始しました。<br />PDFを開いたら、ブラウザを閉じて読書へ。</p><p className={styles.demoNote}>記事と履歴はサンプルデータで保存しています。</p><div className={styles.completeActions}><button className={styles.textButton} onClick={onCreateAnother} type="button">別の雑誌をつくる <span aria-hidden="true">→</span></button><button className={styles.textButton} onClick={onHistory} type="button">履歴を見る <span aria-hidden="true">→</span></button></div></section>;
+  return <section className={styles.complete + " " + styles.enter}><div className={styles.completeMark} aria-hidden="true">✓</div><p className={styles.eyebrow}>YOUR MAGAZINE IS READY</p><h1>雑誌ができました。</h1><p>PDFのダウンロードを開始しました。<br />PDFを開いたら、ブラウザを閉じて読書へ。</p><p className={styles.demoNote}>記事は検証後に匿名ユーザーの履歴へ保存されています。</p><div className={styles.completeActions}><button className={styles.textButton} onClick={onCreateAnother} type="button">別の雑誌をつくる <span aria-hidden="true">→</span></button><button className={styles.textButton} onClick={onHistory} type="button">履歴を見る <span aria-hidden="true">→</span></button></div></section>;
 }
 
 function History({ items, status, error, onReload, onDelete, onCreate }) {

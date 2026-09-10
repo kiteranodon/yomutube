@@ -2,7 +2,7 @@
 
 YouTube の公開通常動画を、落ち着いて読める小さな雑誌へ変える PC 向け Web アプリです。Next.js App Router と JavaScript で作られており、動画情報の取得には YouTube Data API v3、履歴の保存には Supabase を使います。
 
-動画・音声・字幕そのものは保存しません。現在、記事本文と PDF はサンプル表示です。次の Gemini 記事生成では、ここで確認した動画情報を入力として利用できます。
+動画・音声・字幕そのものは保存しません。記事生成では、確認済みの公開YouTube URLをGeminiへ直接渡します。Geminiの生レスポンスは保存せず、Zodで構造と文字数を検証した記事JSONだけを履歴へ保存します。PDFは現在プレビューのみです。
 
 ## 起動方法
 
@@ -99,7 +99,7 @@ https://youtu.be/VIDEO_ID
    npx supabase db push
    ```
 
-   `supabase/migrations/202609100001_create_yomazine_schema.sql`（テーブル・RLS・削除関数）、`supabase/migrations/202609100002_schedule_retention_cleanup.sql`（毎日00:15 JST の削除 Cron）、`supabase/migrations/202609110001_fix_video_url_constraint.sql`（有効な YouTube URL を保存できるようにする修正）が順に適用されます。
+   `supabase/migrations/202609100001_create_yomazine_schema.sql`（テーブル・RLS・削除関数）、`supabase/migrations/202609100002_schedule_retention_cleanup.sql`（毎日00:15 JST の削除 Cron）、`supabase/migrations/202609110001_fix_video_url_constraint.sql`（有効な YouTube URL を保存できるようにする修正）、`supabase/migrations/202609110002_expand_generation_failure_codes.sql`（Geminiの固定失敗コード）が順に適用されます。
 
    CLI を使わない場合は、SQL Editor で上記3ファイルを番号順に実行します。2本目は pg_cron 有効化後に実行します。
 4. `.env.example` を参考に、以下を `.env.local` に設定して開発サーバーを再起動します。
@@ -109,6 +109,7 @@ https://youtu.be/VIDEO_ID
    NEXT_PUBLIC_SUPABASE_ANON_KEY=
    YOUTUBE_API_KEY=
    GEMINI_API_KEY=
+   GEMINI_MODEL=gemini-3.8-flash
    ```
 
    `NEXT_PUBLIC_` を付けるのは Supabase の URL と匿名キーだけです。YouTube・Gemini キー、`SUPABASE_SERVICE_ROLE_KEY` は絶対にブラウザへ渡しません。
@@ -116,6 +117,19 @@ https://youtu.be/VIDEO_ID
 履歴確認では、雑誌を作成してヘッダーの **履歴** から自分の1冊だけが表示されることを確認します。再生成すると同じ雑誌の `magazine_versions` に新しい版が保存されます。通常ブラウザとシークレットウィンドウでは匿名ユーザーが別になるため、互いの履歴は表示されません。
 
 成功履歴は匿名ユーザーごとに90日間保存します。失敗・中断した生成版は24時間後に削除され、PDF、AI画像、動画・音声・字幕、生の AI 応答は保存しません。
+
+## Gemini 記事生成の設定
+
+記事の生成は `POST /api/magazines/generate` からだけ実行します。ブラウザは確認済み動画のスナップショットを送りますが、Route HandlerはYouTube Data API v3で動画ID・正規化URL・タイトル・チャンネル名・再生時間をもう一度確認し、サーバー側の情報だけを保存・Gemini入力に使います。
+
+`.env.local` に次を設定して、開発サーバーを再起動してください。
+
+```bash
+GEMINI_API_KEY=AIStudioで作成したGemini_APIキー
+GEMINI_MODEL=gemini-3.8-flash
+```
+
+`GEMINI_API_KEY` と `GEMINI_MODEL` はRoute Handlerだけが読むサーバー専用設定です。`NEXT_PUBLIC_GEMINI_API_KEY` は作成しないでください。指定するモデルは、公開YouTube URLを入力として扱えるGeminiモデルにしてください。Geminiの返却はリクエスト中のメモリでJSONとして解析し、Zodの必須フィールド・配列数・項目別文字数・読書時間別の総文字数の検証を通過した場合だけ `succeeded` 版へ保存します。
 
 ## 品質確認
 
