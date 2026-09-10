@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import { supabase } from "../supabase";
 import styles from "./page.module.css";
 
@@ -29,12 +30,14 @@ function toStoredArticle() {
   return { magazineTitle: article.title, lead: article.lead, keyPoints: article.keyPoints, memorableMoment: article.memorableMoment, episode: article.episode, discovery: article.discovery, practicalPoints: article.practicalPoints, closing: article.closing };
 }
 
-function formatSaved(minutes) { return Math.max(0, sampleVideo.minutes - minutes); }
+function formatSaved(minutes, durationSeconds = sampleVideo.minutes * 60) { return Math.max(0, Math.ceil(durationSeconds / 60) - minutes); }
 
 export default function Home() {
   const [screen, setScreen] = useState("top");
   const [videoUrl, setVideoUrl] = useState("");
   const [videoConfirmed, setVideoConfirmed] = useState(false);
+  const [videoInfo, setVideoInfo] = useState(null);
+  const [videoCheckState, setVideoCheckState] = useState("idle");
   const [urlError, setUrlError] = useState("");
   const [goal, setGoal] = useState("");
   const [readingMinutes, setReadingMinutes] = useState(5);
@@ -47,6 +50,7 @@ export default function Home() {
   const [history, setHistory] = useState([]);
   const [historyState, setHistoryState] = useState("idle");
   const [historyError, setHistoryError] = useState("");
+  const videoCheckRequest = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -98,24 +102,33 @@ export default function Home() {
     return responseBody;
   }
 
-  function confirmVideo() {
-    const value = videoUrl.trim();
-    let parsed;
-    try { parsed = new URL(value); } catch {
-      setVideoConfirmed(false); setUrlError("YouTubeの通常動画URLを入力してください。"); return;
+  function handleUrlChange(value) {
+    videoCheckRequest.current += 1;
+    setVideoUrl(value); setVideoConfirmed(false); setVideoInfo(null); setVideoCheckState("idle"); setUrlError("");
+  }
+
+  async function confirmVideo() {
+    const requestId = videoCheckRequest.current + 1;
+    videoCheckRequest.current = requestId;
+    setVideoConfirmed(false); setVideoInfo(null); setUrlError(""); setVideoCheckState("checking");
+    try {
+      const response = await fetch("/api/youtube/video", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: videoUrl.trim() }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (requestId !== videoCheckRequest.current) return;
+      if (!response.ok || !result.video) {
+        setUrlError(result.error || "動画情報を取得できませんでした。少し時間を置いて再試行してください。");
+        return;
+      }
+      setVideoInfo(result.video); setVideoConfirmed(true);
+    } catch {
+      if (requestId === videoCheckRequest.current) setUrlError("動画情報を取得できませんでした。少し時間を置いて再試行してください。");
+    } finally {
+      if (requestId === videoCheckRequest.current) setVideoCheckState("idle");
     }
-    const isYouTube = ["youtube.com", "www.youtube.com"].includes(parsed.hostname);
-    const videoId = parsed.searchParams.get("v");
-    if (parsed.pathname.startsWith("/shorts/")) {
-      setVideoConfirmed(false); setUrlError("Shortsは現在対象外です。"); return;
-    }
-    if (!isYouTube || parsed.pathname !== "/watch" || !/^[A-Za-z0-9_-]{11}$/.test(videoId || "")) {
-      setVideoConfirmed(false); setUrlError("YouTubeの通常動画URLを入力してください。"); return;
-    }
-    if (parsed.searchParams.has("list")) {
-      setVideoConfirmed(false); setUrlError("再生リストではなく、通常動画のURLを入力してください。"); return;
-    }
-    setUrlError(""); setVideoConfirmed(true);
   }
 
   async function startGeneration(isRegeneration = false) {
@@ -131,16 +144,15 @@ export default function Home() {
         if (!currentMagazineId) throw new Error("保存先の雑誌が見つかりません。");
         saveRequest = requestApi("/api/magazines/" + currentMagazineId + "/regenerate", { method: "POST", body: JSON.stringify({ article: toStoredArticle() }) });
       } else {
-        const parsed = new URL(videoUrl.trim());
-        const videoId = parsed.searchParams.get("v");
+        if (!videoInfo) throw new Error("動画を確認してから雑誌を作成してください。");
         saveRequest = requestApi("/api/magazines", {
           method: "POST",
           body: JSON.stringify({
-            videoId,
-            videoUrl: "https://www.youtube.com/watch?v=" + videoId,
-            videoTitle: sampleVideo.title,
-            channelTitle: sampleVideo.channel,
-            videoDurationSeconds: sampleVideo.minutes * 60,
+            videoId: videoInfo.videoId,
+            videoUrl: videoInfo.normalizedUrl,
+            videoTitle: videoInfo.title,
+            channelTitle: videoInfo.channelTitle,
+            videoDurationSeconds: videoInfo.durationSeconds,
             readingMinutes,
             userGoal: goal,
             termsVersion: "v1.0",
@@ -184,15 +196,15 @@ export default function Home() {
 
   function resetToCreate() {
     setScreen("create"); setVideoConfirmed(false); setVideoUrl(""); setGoal(""); setAgreed(false);
-    setUrlError(""); setGenerationError(""); setCurrentMagazineId(null);
+    setVideoInfo(null); setVideoCheckState("idle"); setUrlError(""); setGenerationError(""); setCurrentMagazineId(null);
   }
 
   return <main className={styles.app}>
     <header className={styles.header}><button className={styles.logo} onClick={() => setScreen("top")} type="button">Yomazine</button><div className={styles.headerActions}><button className={styles.historyButton} onClick={openHistory} type="button">履歴</button><p>観る時間を、読む時間に。</p></div></header>
     {screen === "top" && <Landing onStart={() => setScreen("create")} />}
-    {screen === "create" && <CreateMagazine videoUrl={videoUrl} videoConfirmed={videoConfirmed} urlError={urlError} goal={goal} readingMinutes={readingMinutes} agreed={agreed} generationError={generationError} authState={authState} authError={authError} onUrlChange={(value) => { setVideoUrl(value); setVideoConfirmed(false); setUrlError(""); }} onConfirm={confirmVideo} onGoalChange={setGoal} onReadingMinutesChange={setReadingMinutes} onAgreedChange={setAgreed} onGenerate={() => startGeneration(false)} />}
+    {screen === "create" && <CreateMagazine videoUrl={videoUrl} videoInfo={videoInfo} videoConfirmed={videoConfirmed} videoCheckState={videoCheckState} urlError={urlError} goal={goal} readingMinutes={readingMinutes} agreed={agreed} generationError={generationError} authState={authState} authError={authError} onUrlChange={handleUrlChange} onConfirm={confirmVideo} onGoalChange={setGoal} onReadingMinutesChange={setReadingMinutes} onAgreedChange={setAgreed} onGenerate={() => startGeneration(false)} />}
     {screen === "generating" && <Generating progress={progress} />}
-    {screen === "preview" && <Preview readingMinutes={readingMinutes} generationError={generationError} onRegenerate={() => startGeneration(true)} onCreatePdf={() => setScreen("complete")} />}
+    {screen === "preview" && <Preview readingMinutes={readingMinutes} videoInfo={videoInfo} generationError={generationError} onRegenerate={() => startGeneration(true)} onCreatePdf={() => setScreen("complete")} />}
     {screen === "complete" && <Complete onCreateAnother={resetToCreate} onHistory={openHistory} />}
     {screen === "history" && <History items={history} status={historyState} error={historyError} onReload={loadHistory} onDelete={deleteMagazine} onCreate={() => setScreen("create")} />}
   </main>;
@@ -207,14 +219,14 @@ function Landing({ onStart }) {
 }
 
 function CreateMagazine(props) {
-  const { videoUrl, videoConfirmed, urlError, goal, readingMinutes, agreed, generationError, authState, authError, onUrlChange, onConfirm, onGoalChange, onReadingMinutesChange, onAgreedChange, onGenerate } = props;
+  const { videoUrl, videoInfo, videoConfirmed, videoCheckState, urlError, goal, readingMinutes, agreed, generationError, authState, authError, onUrlChange, onConfirm, onGoalChange, onReadingMinutesChange, onAgreedChange, onGenerate } = props;
   const ready = videoConfirmed && goal.trim().length > 0 && agreed && authState === "ready";
   return <section className={styles.formPage + " " + styles.enter}>
     <ProgressNav current={videoConfirmed ? 2 : 1} /><h1>読みたい動画を教えてください。</h1><p className={styles.sectionLead}>公開されている通常動画を1本選び、雑誌にしたい視点を決めます。</p>
     {(generationError || authState === "error") && <p className={styles.error} role="alert">{generationError || authError}</p>}
     {authState === "loading" && <p className={styles.fieldNote}>匿名ユーザー用の保存先を準備しています。</p>}
-    <div className={styles.formBlock}><label htmlFor="video-url">YouTube動画のURL</label><div className={styles.urlRow}><input id="video-url" value={videoUrl} onChange={(event) => onUrlChange(event.target.value)} placeholder="https://www.youtube.com/watch?v=..." inputMode="url" /><button className={styles.secondaryButton} onClick={onConfirm} type="button">動画を確認する</button></div>{urlError && <p className={styles.error} role="alert">{urlError}</p>}</div>
-    {videoConfirmed && <div className={styles.videoCard}><div className={styles.thumbnail} aria-hidden="true"><span>{sampleVideo.thumbnail}</span></div><div><p className={styles.videoLabel}>確認できた動画（サンプル表示）</p><h2>{sampleVideo.title}</h2><p>{sampleVideo.channel} <span>／</span> {sampleVideo.minutes}分</p></div></div>}
+    <div className={styles.formBlock}><label htmlFor="video-url">YouTube動画のURL</label><div className={styles.urlRow}><input id="video-url" value={videoUrl} onChange={(event) => onUrlChange(event.target.value)} placeholder="https://www.youtube.com/watch?v=..." inputMode="url" /><button className={styles.secondaryButton} disabled={videoCheckState === "checking"} onClick={onConfirm} type="button">{videoCheckState === "checking" ? "確認中…" : "動画を確認する"}</button></div>{urlError && <p className={styles.error} role="alert">{urlError}</p>}</div>
+    {videoConfirmed && videoInfo && <div className={styles.videoCard}><div className={styles.thumbnail}>{videoInfo.thumbnailUrl ? <Image alt="" height={96} src={videoInfo.thumbnailUrl} width={160} /> : <span aria-hidden="true">{sampleVideo.thumbnail}</span>}</div><div><p className={styles.videoLabel}>確認できた動画</p><h2>{videoInfo.title}</h2><p>{videoInfo.channelTitle} <span>／</span> {videoInfo.durationLabel}</p></div></div>}
     <div className={styles.formBlock}><label htmlFor="goal">この動画で知りたいこと</label><textarea id="goal" value={goal} onChange={(event) => onGoalChange(event.target.value.slice(0, 200))} placeholder="例：この動画から、明日試せる習慣を知りたい" maxLength="200" /><p className={styles.fieldNote}>記事の視点を決めるための必須項目です。</p></div>
     <fieldset className={styles.timeField}><legend>読書時間</legend><div className={styles.timeOptions}>{[3, 5, 10].map((minutes) => <button className={readingMinutes === minutes ? styles.timeSelected : styles.timeOption} key={minutes} onClick={() => onReadingMinutesChange(minutes)} type="button" aria-pressed={readingMinutes === minutes}><strong>約{minutes}分</strong><span>{minutes === 3 ? "要点をすばやく" : minutes === 5 ? "ちょうどよく読む" : "ゆっくり深く読む"}</span></button>)}</div></fieldset>
     <label className={styles.agreement}><input checked={agreed} onChange={(event) => onAgreedChange(event.target.checked)} type="checkbox" /><span>個人利用・非再配布に同意する</span></label><p className={styles.terms}>動画・音声・字幕は保存せず、匿名ユーザー本人だけが読める雑誌履歴を90日間保存します。</p>
@@ -230,11 +242,14 @@ function Generating({ progress }) {
   return <section className={styles.generating + " " + styles.enter} aria-live="polite"><div className={styles.loadingMark} aria-hidden="true"><span /></div><p className={styles.eyebrow}>CREATING YOUR MAGAZINE</p><h1>雑誌を編集中です。</h1><p>少しだけお待ちください。動画・音声・字幕は保存しません。</p><ol className={styles.generationList}>{generationSteps.map((step, index) => <li className={index <= progress ? styles.doneStep : ""} key={step}><span>{index < progress ? "✓" : index + 1}</span>{step}</li>)}</ol><small>生成には数十秒かかることがあります。</small></section>;
 }
 
-function Preview({ readingMinutes, generationError, onRegenerate, onCreatePdf }) {
-  const saved = formatSaved(readingMinutes);
+function Preview({ readingMinutes, videoInfo, generationError, onRegenerate, onCreatePdf }) {
+  const durationSeconds = videoInfo?.durationSeconds || sampleVideo.minutes * 60;
+  const durationLabel = videoInfo?.durationLabel || `${sampleVideo.minutes}分`;
+  const channelTitle = videoInfo?.channelTitle || sampleVideo.channel;
+  const saved = formatSaved(readingMinutes, durationSeconds);
   return <section className={styles.preview + " " + styles.enter}>
     {generationError && <p className={styles.error} role="alert">{generationError}</p>}
-    <div className={styles.previewHero}><div className={styles.previewCover}><span>YOMAZINE / 001</span><div /><h2>小さな<br />習慣の<br />つくりかた。</h2><p>暮らしを整える研究室</p></div><div className={styles.summary}><p className={styles.eyebrow}>PREVIEW</p><h1>{article.title}</h1><p className={styles.lead}>{article.lead}</p><ol className={styles.keyPoints}>{article.keyPoints.map((point, index) => <li key={point}><span>0{index + 1}</span>{point}</li>)}</ol><div className={styles.timeCard}><p>動画 <strong>{sampleVideo.minutes}分</strong> <span>→</span> 読書 約<strong>{readingMinutes}分</strong></p>{saved > 0 && <p><strong>{saved}分</strong>短縮できました</p>}</div></div></div>
+    <div className={styles.previewHero}><div className={styles.previewCover}><span>YOMAZINE / 001</span><div /><h2>小さな<br />習慣の<br />つくりかた。</h2><p>{channelTitle}</p></div><div className={styles.summary}><p className={styles.eyebrow}>PREVIEW</p><h1>{article.title}</h1><p className={styles.lead}>{article.lead}</p><ol className={styles.keyPoints}>{article.keyPoints.map((point, index) => <li key={point}><span>0{index + 1}</span>{point}</li>)}</ol><div className={styles.timeCard}><p>動画 <strong>{durationLabel}</strong> <span>→</span> 読書 約<strong>{readingMinutes}分</strong></p>{saved > 0 && <p><strong>{saved}分</strong>短縮できました</p>}</div></div></div>
     <article className={styles.article}><p className={styles.eyebrow}>FULL ARTICLE</p><h2>{article.title}</h2><p className={styles.articleLead}>{article.lead}</p><section><h3>印象に残ったこと</h3><blockquote>{article.memorableMoment}</blockquote></section><section><h3>小さな準備から始める</h3><p>{article.episode}</p></section><section><h3>続けられる景色をつくる</h3><p>{article.discovery}</p></section><section><h3>明日からの実践ポイント</h3><ul>{article.practicalPoints.map((point) => <li key={point}>{point}</li>)}</ul></section><section><h3>おわりに</h3><p>{article.closing}</p></section></article>
     <div className={styles.previewActions}><button className={styles.secondaryButton} onClick={onRegenerate} type="button">もう一度生成する</button><button className={styles.primaryButton} onClick={onCreatePdf} type="button">この内容でPDFを作る <span aria-hidden="true">→</span></button></div>
   </section>;
