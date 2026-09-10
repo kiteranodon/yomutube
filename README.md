@@ -1,36 +1,36 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Yomazine
 
-## Getting Started
+YouTube動画を、落ち着いて読める小さな雑誌へ変えるPC向けWebアプリです。現在は画面フローと記事表示をサンプルデータで実装しています。YouTube、Gemini、PDFの実処理はまだ接続していません。
 
-First, run the development server:
+## 起動方法
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+ブラウザで `http://localhost:3000` を開きます。
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+## 確認手順
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. 「雑誌をつくる」を選ぶ。
+2. 通常のYouTube動画URL（例: `https://www.youtube.com/watch?v=dQw4w9WgXcQ`）を入力し、「動画を確認する」を選ぶ。
+3. 知りたいことを入力し、読書時間を選び、同意チェックを入れる。
+4. 「雑誌の構成をつくる」を選ぶと、生成中の3段階表示の後にサンプル記事のプレビューを表示する。
+5. プレビューで記事全文、重要ポイント3つ、動画時間・読書時間・短縮時間を確認する。「この内容でPDFを作る」は、現時点では完了画面へ進むサンプル動作です。
 
-## Learn More
+品質確認には次を実行します。
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npm run lint
+npm run build
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Supabase接続を次に行う手順
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. Supabaseプロジェクトを作成し、Authenticationで **Anonymous Sign-ins** を有効にする。
+2. `supabase/migrations/202609100001_create_yomazine_schema.sql`、続けて `supabase/migrations/202609100002_schedule_retention_cleanup.sql` をSupabaseへ適用する。2本目の前にDashboardでpg_cronを有効にする。
+3. `.env.example` を参考に `.env.local` へ `NEXT_PUBLIC_SUPABASE_URL` と `NEXT_PUBLIC_SUPABASE_ANON_KEY` を設定する。`YOUTUBE_API_KEY` と `GEMINI_API_KEY` はサーバー専用の値として設定する。
+4. 起動時に匿名サインインを行い、Next.js Route Handlerからユーザーのセッションを引き継いで履歴を読み書きする。`service_role`、YouTubeキー、Geminiキーをクライアントへ渡さない。
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+成功履歴は匿名ユーザーごとに90日間保存します。失敗・中断した生成版は24時間後に削除され、PDF、AI画像、動画・音声・字幕、生のAI応答は保存しません。
