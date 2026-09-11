@@ -110,6 +110,7 @@ https://youtu.be/VIDEO_ID
    YOUTUBE_API_KEY=
    GEMINI_API_KEY=
    GEMINI_MODEL=gemini-3.8-flash
+   GEMINI_IMAGE_MODEL=
    ```
 
    `NEXT_PUBLIC_` を付けるのは Supabase の URL と匿名キーだけです。YouTube・Gemini キー、`SUPABASE_SERVICE_ROLE_KEY` は絶対にブラウザへ渡しません。
@@ -130,6 +131,10 @@ GEMINI_MODEL=gemini-3.8-flash
 ```
 
 `GEMINI_API_KEY` と `GEMINI_MODEL` はRoute Handlerだけが読むサーバー専用設定です。`NEXT_PUBLIC_GEMINI_API_KEY` は作成しないでください。指定するモデルは、公開YouTube URLを入力として扱えるGeminiモデルにしてください。Geminiの返却はリクエスト中のメモリでJSONとして解析し、Zodの必須フィールド・配列数・項目別文字数・読書時間別の総文字数の検証を通過した場合だけ `succeeded` 版へ保存します。
+
+## Gemini AI画像生成の設定
+
+記事生成後、`POST /api/magazines/[id]/illustrations` が表紙用・本文用のオリジナルイラストを生成します。`.env.local` の `GEMINI_IMAGE_MODEL` に、画像出力をサポートするGeminiモデル名を設定してください。画像データはRoute Handlerのレスポンスとブラウザのプレビュー内だけに置き、Supabase・Storage・履歴には保存しません。画像生成に失敗しても記事と履歴はそのまま利用でき、プレビューから画像だけ再生成できます。
 
 ## 品質確認
 

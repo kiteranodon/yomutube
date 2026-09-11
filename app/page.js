@@ -23,7 +23,7 @@ const sampleArticle = {
   closing: "変化は、遠い場所にある大きな決断ではありません。今日の終わりに一冊の本を置くこと、その小さな準備から明日の景色は静かに変わり始めます。",
 };
 
-const generationSteps = ["動画を読んでいます", "記事を編集中", "雑誌を組版中"];
+const generationSteps = ["動画を読んでいます", "記事を編集中", "イラストを描いています", "雑誌を組版中"];
 const wait = (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 
 function formatSaved(minutes, durationSeconds = sampleVideo.minutes * 60) { return Math.max(0, Math.ceil(durationSeconds / 60) - minutes); }
@@ -43,7 +43,11 @@ export default function Home() {
   const [authError, setAuthError] = useState("");
   const [generationError, setGenerationError] = useState("");
   const [currentMagazineId, setCurrentMagazineId] = useState(null);
+  const [currentVersionId, setCurrentVersionId] = useState(null);
   const [currentArticle, setCurrentArticle] = useState(null);
+  const [illustrations, setIllustrations] = useState(null);
+  const [illustrationState, setIllustrationState] = useState("idle");
+  const [illustrationError, setIllustrationError] = useState("");
   const [history, setHistory] = useState([]);
   const [historyState, setHistoryState] = useState("idle");
   const [historyError, setHistoryError] = useState("");
@@ -79,7 +83,8 @@ export default function Home() {
     if (screen !== "generating") return undefined;
     const first = window.setTimeout(() => setProgress(1), 700);
     const second = window.setTimeout(() => setProgress(2), 1400);
-    return () => { window.clearTimeout(first); window.clearTimeout(second); };
+    const third = window.setTimeout(() => setProgress(3), 2100);
+    return () => { window.clearTimeout(first); window.clearTimeout(second); window.clearTimeout(third); };
   }, [screen]);
 
   async function requestApi(path, options = {}) {
@@ -153,11 +158,42 @@ export default function Home() {
       });
       const [saved] = await Promise.all([saveRequest, wait(2200)]);
       if (!isRegeneration) setCurrentMagazineId(saved.magazine.id);
+      setCurrentVersionId(saved.version.id);
       setCurrentArticle(saved.article);
+      setIllustrations(null);
+      setIllustrationError("");
+      setIllustrationState("loading");
+      try {
+        const imageResult = await requestApi(`/api/magazines/${saved.magazine.id}/illustrations`, {
+          method: "POST",
+          body: JSON.stringify({ versionId: saved.version.id }),
+        });
+        setIllustrations(imageResult.images);
+        setIllustrationState("ready");
+      } catch (imageError) {
+        setIllustrationState("error");
+        setIllustrationError(imageError.message || "イラストを生成できませんでした。");
+      }
       setScreen("preview");
     } catch (error) {
       setGenerationError(error.message || "履歴を保存できませんでした。");
       setScreen(isRegeneration ? "preview" : "create");
+    }
+  }
+
+  async function regenerateIllustrations() {
+    if (!currentMagazineId || !currentVersionId) return;
+    setIllustrationState("loading"); setIllustrationError("");
+    try {
+      const result = await requestApi(`/api/magazines/${currentMagazineId}/illustrations`, {
+        method: "POST",
+        body: JSON.stringify({ versionId: currentVersionId }),
+      });
+      setIllustrations(result.images);
+      setIllustrationState("ready");
+    } catch (error) {
+      setIllustrationState("error");
+      setIllustrationError(error.message || "イラストを生成できませんでした。");
     }
   }
 
@@ -188,7 +224,7 @@ export default function Home() {
 
   function resetToCreate() {
     setScreen("create"); setVideoConfirmed(false); setVideoUrl(""); setGoal(""); setAgreed(false);
-    setVideoInfo(null); setVideoCheckState("idle"); setUrlError(""); setGenerationError(""); setCurrentMagazineId(null); setCurrentArticle(null);
+    setVideoInfo(null); setVideoCheckState("idle"); setUrlError(""); setGenerationError(""); setCurrentMagazineId(null); setCurrentVersionId(null); setCurrentArticle(null); setIllustrations(null); setIllustrationState("idle"); setIllustrationError("");
   }
 
   return <main className={styles.app}>
@@ -196,7 +232,7 @@ export default function Home() {
     {screen === "top" && <Landing onStart={() => setScreen("create")} />}
     {screen === "create" && <CreateMagazine videoUrl={videoUrl} videoInfo={videoInfo} videoConfirmed={videoConfirmed} videoCheckState={videoCheckState} urlError={urlError} goal={goal} readingMinutes={readingMinutes} agreed={agreed} generationError={generationError} authState={authState} authError={authError} onUrlChange={handleUrlChange} onConfirm={confirmVideo} onGoalChange={setGoal} onReadingMinutesChange={setReadingMinutes} onAgreedChange={setAgreed} onGenerate={() => startGeneration(false)} />}
     {screen === "generating" && <Generating progress={progress} />}
-    {screen === "preview" && <Preview articleData={currentArticle} readingMinutes={readingMinutes} videoInfo={videoInfo} generationError={generationError} onRegenerate={() => startGeneration(true)} onCreatePdf={() => setScreen("complete")} />}
+    {screen === "preview" && <Preview articleData={currentArticle} readingMinutes={readingMinutes} videoInfo={videoInfo} generationError={generationError} illustrations={illustrations} illustrationState={illustrationState} illustrationError={illustrationError} onRegenerate={() => startGeneration(true)} onRegenerateIllustrations={regenerateIllustrations} onCreatePdf={() => setScreen("complete")} />}
     {screen === "complete" && <Complete onCreateAnother={resetToCreate} onHistory={openHistory} />}
     {screen === "history" && <History items={history} status={historyState} error={historyError} onReload={loadHistory} onDelete={deleteMagazine} onCreate={() => setScreen("create")} />}
   </main>;
@@ -234,7 +270,7 @@ function Generating({ progress }) {
   return <section className={styles.generating + " " + styles.enter} aria-live="polite"><div className={styles.loadingMark} aria-hidden="true"><span /></div><p className={styles.eyebrow}>CREATING YOUR MAGAZINE</p><h1>雑誌を編集中です。</h1><p>少しだけお待ちください。動画・音声・字幕は保存しません。</p><ol className={styles.generationList}>{generationSteps.map((step, index) => <li className={index <= progress ? styles.doneStep : ""} key={step}><span>{index < progress ? "✓" : index + 1}</span>{step}</li>)}</ol><small>生成には数十秒かかることがあります。</small></section>;
 }
 
-function Preview({ articleData, readingMinutes, videoInfo, generationError, onRegenerate, onCreatePdf }) {
+function Preview({ articleData, readingMinutes, videoInfo, generationError, illustrations, illustrationState, illustrationError, onRegenerate, onRegenerateIllustrations, onCreatePdf }) {
   const article = articleData || {
     magazineTitle: sampleArticle.title,
     lead: sampleArticle.lead,
@@ -251,9 +287,10 @@ function Preview({ articleData, readingMinutes, videoInfo, generationError, onRe
   const saved = formatSaved(readingMinutes, durationSeconds);
   return <section className={styles.preview + " " + styles.enter}>
     {generationError && <p className={styles.error} role="alert">{generationError}</p>}
-    <div className={styles.previewHero}><div className={styles.previewCover}><span>YOMAZINE / 001</span><div /><h2>{article.magazineTitle}</h2><p>{channelTitle}</p></div><div className={styles.summary}><p className={styles.eyebrow}>PREVIEW</p><h1>{article.magazineTitle}</h1><p className={styles.lead}>{article.lead}</p><ol className={styles.keyPoints}>{article.keyPoints.map((point, index) => <li key={point}><span>0{index + 1}</span>{point}</li>)}</ol><div className={styles.timeCard}><p>動画 <strong>{durationLabel}</strong> <span>→</span> 読書 約<strong>{readingMinutes}分</strong></p>{saved > 0 && <p><strong>{saved}分</strong>短縮できました</p>}</div></div></div>
-    <article className={styles.article}><p className={styles.eyebrow}>FULL ARTICLE</p><h2>{article.magazineTitle}</h2><p className={styles.articleLead}>{article.lead}</p><section><h3>印象に残ったこと</h3><blockquote>{article.memorableMoment}</blockquote></section><section><h3>小さな準備から始める</h3><p>{article.episode}</p></section><section><h3>続けられる景色をつくる</h3><p>{article.discovery}</p></section><section><h3>明日からの実践ポイント</h3><ul>{article.practicalPoints.map((point) => <li key={point}>{point}</li>)}</ul></section><section><h3>おわりに</h3><p>{article.closing}</p></section></article>
-    <div className={styles.previewActions}><button className={styles.secondaryButton} onClick={onRegenerate} type="button">もう一度生成する</button><button className={styles.primaryButton} onClick={onCreatePdf} type="button">この内容でPDFを作る <span aria-hidden="true">→</span></button></div>
+    <div className={styles.previewHero}><div className={styles.previewCover}><span>YOMAZINE / 001</span>{illustrations?.cover ? <Image alt="記事テーマをもとにAIが生成した表紙イラスト" className={styles.coverIllustration} height={960} src={illustrations.cover} unoptimized width={720} /> : <div className={styles.coverFallback} aria-hidden="true" />}<h2>{article.magazineTitle}</h2><p>{channelTitle}</p></div><div className={styles.summary}><p className={styles.eyebrow}>PREVIEW</p><h1>{article.magazineTitle}</h1><p className={styles.lead}>{article.lead}</p><ol className={styles.keyPoints}>{article.keyPoints.map((point, index) => <li key={point}><span>0{index + 1}</span>{point}</li>)}</ol><div className={styles.timeCard}><p>動画 <strong>{durationLabel}</strong> <span>→</span> 読書 約<strong>{readingMinutes}分</strong></p>{saved > 0 && <p><strong>{saved}分</strong>短縮できました</p>}</div></div></div>
+    <div className={styles.illustrationStatus} aria-live="polite">{illustrationState === "loading" && <p>表紙用・本文用のオリジナルイラストを生成しています。</p>}{illustrationState === "ready" && <p>AI生成イラストはこのプレビューだけに表示され、履歴には保存されません。</p>}{illustrationState === "error" && <><p>{illustrationError}</p><button className={styles.textButton} onClick={onRegenerateIllustrations} type="button">イラストだけ再生成する <span aria-hidden="true">→</span></button></>}</div>
+    <article className={styles.article}><p className={styles.eyebrow}>FULL ARTICLE</p><h2>{article.magazineTitle}</h2><p className={styles.articleLead}>{article.lead}</p><section><h3>印象に残ったこと</h3><blockquote>{article.memorableMoment}</blockquote></section><section><h3>小さな準備から始める</h3><p>{article.episode}</p></section>{illustrations?.article && <figure className={styles.articleIllustration}><Image alt="記事テーマをもとにAIが生成した本文イラスト" height={900} src={illustrations.article} unoptimized width={1200} /></figure>}<section><h3>続けられる景色をつくる</h3><p>{article.discovery}</p></section><section><h3>明日からの実践ポイント</h3><ul>{article.practicalPoints.map((point) => <li key={point}>{point}</li>)}</ul></section><section><h3>おわりに</h3><p>{article.closing}</p></section></article>
+    <div className={styles.previewActions}><button className={styles.secondaryButton} onClick={onRegenerate} type="button">もう一度生成する</button>{illustrationState === "error" && <button className={styles.secondaryButton} onClick={onRegenerateIllustrations} type="button">イラストを再生成</button>}<button className={styles.primaryButton} onClick={onCreatePdf} type="button">この内容でPDFを作る <span aria-hidden="true">→</span></button></div>
   </section>;
 }
 
