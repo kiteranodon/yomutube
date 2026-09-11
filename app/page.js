@@ -54,6 +54,7 @@ export default function Home() {
   const [historyError, setHistoryError] = useState("");
   const [pdfState, setPdfState] = useState("idle");
   const [pdfError, setPdfError] = useState("");
+  const [numericYearStyle, setNumericYearStyle] = useState("original");
   const videoCheckRequest = useRef(0);
 
   useEffect(() => {
@@ -259,6 +260,7 @@ export default function Home() {
         durationSeconds: videoInfo?.durationSeconds || sampleVideo.minutes * 60,
         readingMinutes,
         normalizedUrl: videoInfo?.normalizedUrl || "https://www.youtube.com/",
+        pdfOptions: { numericYearStyle },
       });
       const blob = new Blob([result.bytes], { type: "application/pdf" });
       const url = URL.createObjectURL(blob);
@@ -294,7 +296,7 @@ export default function Home() {
     {screen === "top" && <Landing onStart={() => setScreen("create")} />}
     {screen === "create" && <CreateMagazine videoUrl={videoUrl} videoInfo={videoInfo} videoConfirmed={videoConfirmed} videoCheckState={videoCheckState} urlError={urlError} goal={goal} readingMinutes={readingMinutes} agreed={agreed} generationError={generationError} authState={authState} authError={authError} onUrlChange={handleUrlChange} onConfirm={confirmVideo} onGoalChange={setGoal} onReadingMinutesChange={setReadingMinutes} onAgreedChange={setAgreed} onGenerate={() => startGeneration(false)} />}
     {screen === "generating" && <Generating progress={progress} />}
-    {screen === "preview" && <Preview articleData={currentArticle} readingMinutes={readingMinutes} videoInfo={videoInfo} generationError={generationError} illustrations={illustrations} illustrationState={illustrationState} illustrationError={illustrationError} pdfState={pdfState} pdfError={pdfError} onRegenerate={() => startGeneration(true)} onRegenerateIllustrations={regenerateIllustrations} onCreatePdf={createPdf} />}
+    {screen === "preview" && <Preview articleData={currentArticle} readingMinutes={readingMinutes} videoInfo={videoInfo} generationError={generationError} illustrations={illustrations} illustrationState={illustrationState} illustrationError={illustrationError} pdfState={pdfState} pdfError={pdfError} numericYearStyle={numericYearStyle} onNumericYearStyleChange={setNumericYearStyle} onRegenerate={() => startGeneration(true)} onRegenerateIllustrations={regenerateIllustrations} onCreatePdf={createPdf} />}
     {screen === "complete" && <Complete onCreateAnother={resetToCreate} onHistory={openHistory} />}
     {screen === "history" && <History items={history} status={historyState} error={historyError} onReload={loadHistory} onDelete={deleteMagazine} onOpen={openMagazine} onCreate={() => setScreen("create")} />}
   </main>;
@@ -332,7 +334,7 @@ function Generating({ progress }) {
   return <section className={styles.generating + " " + styles.enter} aria-live="polite"><div className={styles.loadingMark} aria-hidden="true"><span /></div><p className={styles.eyebrow}>CREATING YOUR MAGAZINE</p><h1>雑誌を編集中です。</h1><p>少しだけお待ちください。動画・音声・字幕は保存しません。</p><ol className={styles.generationList}>{generationSteps.map((step, index) => <li className={index <= progress ? styles.doneStep : ""} key={step}><span>{index < progress ? "✓" : index + 1}</span>{step}</li>)}</ol><small>生成には数十秒かかることがあります。</small></section>;
 }
 
-function Preview({ articleData, readingMinutes, videoInfo, generationError, illustrations, illustrationState, illustrationError, pdfState, pdfError, onRegenerate, onRegenerateIllustrations, onCreatePdf }) {
+function Preview({ articleData, readingMinutes, videoInfo, generationError, illustrations, illustrationState, illustrationError, pdfState, pdfError, numericYearStyle, onNumericYearStyleChange, onRegenerate, onRegenerateIllustrations, onCreatePdf }) {
   const article = articleData || {
     magazineTitle: sampleArticle.title,
     lead: sampleArticle.lead,
@@ -352,6 +354,7 @@ function Preview({ articleData, readingMinutes, videoInfo, generationError, illu
     <div className={styles.previewHero}><div className={styles.previewCover}><span>YOMAZINE / 001</span>{illustrations?.cover ? <Image alt="記事テーマをもとにAIが生成した表紙イラスト" className={styles.coverIllustration} height={960} src={illustrations.cover} unoptimized width={720} /> : <div className={styles.coverFallback} aria-hidden="true" />}<h2>{article.magazineTitle}</h2><p>{channelTitle}</p></div><div className={styles.summary}><p className={styles.eyebrow}>PREVIEW</p><h1>{article.magazineTitle}</h1><p className={styles.lead}>{article.lead}</p><ol className={styles.keyPoints}>{article.keyPoints.map((point, index) => <li key={point}><span>0{index + 1}</span>{point}</li>)}</ol><div className={styles.timeCard}><p>動画 <strong>{durationLabel}</strong> <span>→</span> 読書 約<strong>{readingMinutes}分</strong></p>{saved > 0 && <p><strong>{saved}分</strong>短縮できました</p>}</div></div></div>
     <div className={styles.illustrationStatus} aria-live="polite">{illustrationState === "loading" && <p>表紙用・本文用のオリジナルイラストを生成しています。</p>}{illustrationState === "ready" && <p>AI生成イラストはこのプレビューだけに表示され、履歴には保存されません。</p>}{illustrationState === "error" && <><p>{illustrationError}</p><button className={styles.textButton} onClick={onRegenerateIllustrations} type="button">イラストだけ再生成する <span aria-hidden="true">→</span></button></>}</div>
     <article className={styles.article}><p className={styles.eyebrow}>FULL ARTICLE</p><h2>{article.magazineTitle}</h2><p className={styles.articleLead}>{article.lead}</p><section><h3>印象に残ったこと</h3><blockquote>{article.memorableMoment}</blockquote></section><section><h3>小さな準備から始める</h3><p>{article.episode}</p></section>{illustrations?.article && <figure className={styles.articleIllustration}><Image alt="記事テーマをもとにAIが生成した本文イラスト" height={900} src={illustrations.article} unoptimized width={1200} /></figure>}<section><h3>続けられる景色をつくる</h3><p>{article.discovery}</p></section><section><h3>明日からの実践ポイント</h3><ul>{article.practicalPoints.map((point) => <li key={point}>{point}</li>)}</ul></section><section><h3>おわりに</h3><p>{article.closing}</p></section></article>
+    <fieldset className={styles.pdfOptions}><legend>縦書きPDFの組版</legend><label>年号の数字<select disabled={pdfState === "loading"} value={numericYearStyle} onChange={(event) => onNumericYearStyleChange(event.target.value)}><option value="original">原文のまま</option><option value="kanji">漢数字で表示</option></select></label></fieldset>
     {pdfError && <p className={styles.error + " " + styles.pdfError} role="alert">{pdfError}</p>}
     <div className={styles.previewActions}><button className={styles.secondaryButton} disabled={pdfState === "loading"} onClick={onRegenerate} type="button">もう一度生成する</button>{illustrationState === "error" && <button className={styles.secondaryButton} disabled={pdfState === "loading"} onClick={onRegenerateIllustrations} type="button">イラストを再生成</button>}<button className={styles.primaryButton} disabled={pdfState === "loading"} onClick={onCreatePdf} type="button">{pdfState === "loading" ? "PDFを作成中…" : <>この内容でPDFを作る <span aria-hidden="true">→</span></>}</button></div>
   </section>;
