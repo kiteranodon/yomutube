@@ -7,7 +7,7 @@ import { getVerifiedYouTubeVideo } from "../../../../lib/youtube-video";
 export const runtime = "nodejs";
 
 const TERMS_VERSION = "v1.0";
-const PROMPT_TEMPLATE_VERSION = "gemini-magazine-v1";
+const PROMPT_TEMPLATE_VERSION = "gemini-magazine-v2";
 const ARTICLE_SCHEMA_VERSION = "v1";
 const FAILURE_CODES = new Set([
   "gemini_key_missing",
@@ -49,6 +49,7 @@ function articlePrompt({ video, userGoal, readingMinutes }) {
 - 単なる箇条書き要約にせず、導入・具体的な場面・そこから得られる発見・明日への提案へと流れる雑誌風の文章にする。
 - 動画で確認できないことを事実のように補わない。不確かな場合は断定を避ける。
 - 直接の長い引用や字幕の転記はしない。動画を再生しなくても読める自然な日本語に言い換える。
+- 各フィールドの先頭および改行後の文頭を、読点「、」や句点「。」で始めない。
 - keyPointsは必ず3件、practicalPointsは1〜8件にする。
 - 全フィールドを合わせた本文量は空白を除いて${characterGuide}を目安にする。
 - 指定したJSON以外の文章、Markdown、コードフェンスは返さない。
