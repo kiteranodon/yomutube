@@ -305,7 +305,7 @@ export default function Home() {
 
 function Landing({ onStart }) {
   return <section className={styles.landing + " " + styles.enter}>
-    <div className={styles.heroCopy}><p className={styles.eyebrow}>YOUTUBE TO READING</p><h1>観る時間を、<br />読む時間に。</h1><p className={styles.description}>YouTube動画を、落ち着いて読める小さな雑誌へ。気になる内容だけを、あなたのペースで読み直せます。</p><button className={styles.primaryButton} onClick={onStart} type="button">雑誌をつくる <span aria-hidden="true">→</span></button></div>
+    <div className={styles.heroCopy}><p className={styles.eyebrow}>YOUTUBE TO READING</p><h1><span className={styles.heroLine}>観る時間を、</span><br /><span className={styles.heroLine}>読む時間に。</span></h1><p className={styles.description}>YouTube動画を、落ち着いて読める小さな雑誌へ。気になる内容だけを、あなたのペースで読み直せます。</p><button className={styles.primaryButton} onClick={onStart} type="button">雑誌をつくる <span aria-hidden="true">→</span></button></div>
     <div className={styles.magazineStage} aria-label="Yomazineの雑誌見本"><div className={styles.backPage}><span>01</span><i /><i /><i /><small>SMALL STEPS<br />FOR EVERY DAY</small></div><div className={styles.coverPage}><span>YOMAZINE / 001</span><div className={styles.coverShape} /><h2>小さな<br />習慣の<br />つくりかた。</h2><p>READING ISSUE</p></div></div>
     <ol className={styles.flowList}><li><span>01</span>URLを入れる</li><li><span>02</span>読む目的を選ぶ</li><li><span>03</span>PDFで読む</li></ol>
   </section>;
