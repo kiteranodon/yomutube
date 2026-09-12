@@ -102,7 +102,7 @@ erDiagram
 `article` は要件定義書の `MagazineArticle` に対応するJSONBです。サーバーは保存前にZod等で、必須項目・文字数・重要ポイント3件・実践ポイント・引用ルールを検証します。DBにも必須キーと配列型の最低限の制約を置きます。
 
 ```ts
-type MagazineArticleV1 = {
+type MagazineArticleV2 = {
   magazineTitle: string;
   lead: string;
   keyPoints: [string, string, string];
@@ -111,6 +111,7 @@ type MagazineArticleV1 = {
   episode: string;
   discovery: string;
   practicalPoints: string[];
+  userGoalAnswer: string;
   closing: string;
 };
 ```

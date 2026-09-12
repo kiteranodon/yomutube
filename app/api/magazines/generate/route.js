@@ -7,8 +7,8 @@ import { getVerifiedYouTubeVideo } from "../../../../lib/youtube-video";
 export const runtime = "nodejs";
 
 const TERMS_VERSION = "v1.0";
-const PROMPT_TEMPLATE_VERSION = "gemini-magazine-v2";
-const ARTICLE_SCHEMA_VERSION = "v1";
+const PROMPT_TEMPLATE_VERSION = "gemini-magazine-v3";
+const ARTICLE_SCHEMA_VERSION = "v2";
 const FAILURE_CODES = new Set([
   "gemini_key_missing",
   "gemini_rate_limited",
@@ -46,6 +46,12 @@ function articlePrompt({ video, userGoal, readingMinutes }) {
 - 想定読書時間: 約${readingMinutes}分
 
 記事の条件:
+- 「読者が知りたいこと」を記事全体で答える唯一の編集テーマにする。
+- タイトル、リード、重要ポイント、場面、エピソード、発見、実践ポイント、結びのすべてを、そのテーマへの回答または回答を支える動画内の根拠に限定する。
+- テーマと直接関係しない動画内容、一般的な動画要約、周辺情報は省く。
+- userGoalAnswerには、読者が知りたいことへの直接的な回答を、動画内で確認できる内容だけを使って簡潔にまとめる。
+- 動画内に十分な回答がない場合、推測で補わず、確認できる範囲と確認できない点をuserGoalAnswerに明記する。
+- JSONを返す前に、各フィールドが読者の知りたいことに直接役立つかを確認し、役立たない内容を削る。
 - 単なる箇条書き要約にせず、導入・具体的な場面・そこから得られる発見・明日への提案へと流れる雑誌風の文章にする。
 - 動画で確認できないことを事実のように補わない。不確かな場合は断定を避ける。
 - 直接の長い引用や字幕の転記はしない。動画を再生しなくても読める自然な日本語に言い換える。
