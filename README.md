@@ -1,164 +1,260 @@
 # Yomazine
 
-YouTube の公開通常動画を、落ち着いて読める小さな雑誌へ変える PC 向け Web アプリです。Next.js App Router と JavaScript で作られており、動画情報の取得には YouTube Data API v3、履歴の保存には Supabase を使います。
+> 観る時間を、読む時間に。
 
-動画・音声・字幕そのものは保存しません。記事生成では、確認済みの公開YouTube URLをGeminiへ直接渡します。Geminiの生レスポンスは保存せず、Zodで構造と文字数を検証した記事JSONだけを履歴へ保存します。
+Yomazine（ヨマジン）は、公開されている YouTube の通常動画を、落ち着いて読める日本語の雑誌へ変換する PC 向け Web アプリです。動画 URL と「知りたいこと」、希望する読書時間を入力すると、Gemini が記事を構成し、オリジナルイラスト入りの縦書き PDF としてダウンロードできます。
 
-## 起動方法
+動画・音声・字幕、Gemini の生レスポンス、生成画像、PDF は保存しません。Zod で検証を通過した記事 JSON と動画情報だけを、Supabase の匿名ユーザーごとの履歴として保存します。
+
+## プロジェクトの概要
+
+主な機能は次のとおりです。
+
+- YouTube URL の形式チェックと、YouTube Data API v3 による動画情報の取得
+- Shorts URL、再生リスト、ライブ配信、非公開動画、60 分超の動画の除外
+- ユーザーの関心と読書時間に合わせた Gemini による日本語記事生成
+- Gemini による表紙・本文用イラストの生成（失敗時は代替レイアウトを使用）
+- A4 縦書き・最大 10 ページの PDF をブラウザで生成してダウンロード
+- Supabase Auth の匿名サインインと、RLS で保護された生成履歴の保存
+- 成功履歴の 90 日保存と、失敗・中断した生成版の 24 時間後削除
+
+処理の流れは以下のとおりです。
+
+```text
+YouTube URL を入力
+  -> 動画情報を確認
+  -> 知りたいこと・読書時間を指定
+  -> Gemini で記事を生成
+  -> イラストと記事をプレビュー
+  -> ブラウザ内で PDF を生成・ダウンロード
+```
+
+対応 URL は `https://www.youtube.com/watch?v=VIDEO_ID` と `https://youtu.be/VIDEO_ID` です。スマートフォン対応、メール会員登録、他端末との履歴同期、PDF のクラウド保存は現在の対象外です。
+
+## 使用している主な技術
+
+| 分類 | 技術 | 用途 |
+| --- | --- | --- |
+| フレームワーク | Next.js 16.3.4（App Router / JavaScript） | 画面、Route Handler、開発・本番ビルド |
+| UI | React 19.2.8 / CSS Modules | 画面とスタイル |
+| AI | Google Gen AI SDK（`@google/genai`）/ Gemini API | YouTube 動画を基にした記事・イラスト生成 |
+| 動画情報 | YouTube Data API v3 | タイトル、チャンネル、再生時間などの取得 |
+| DB・認証 | Supabase / Supabase Auth / PostgreSQL | 匿名認証、記事履歴、RLS、保存期限の管理 |
+| PDF | `pdf-lib` / `@pdf-lib/fontkit` | 日本語フォントを埋め込んだ縦書き PDF の生成 |
+| バリデーション | Zod 4 | Gemini が返す記事 JSON の構造・文字数検証 |
+| 品質管理 | ESLint 9 / eslint-config-next | 静的解析 |
+
+## 必要な環境
+
+- Node.js 20.9 以上
+- npm（`package-lock.json` を使用）
+- モダンな PC ブラウザ
+- Google Cloud プロジェクトと YouTube Data API v3 の API キー
+- Google AI Studio で発行した Gemini API キー
+- Supabase プロジェクト
+- Supabase CLI（マイグレーションを CLI で適用する場合のみ。`npx` で実行可能）
+
+## 必要な環境変数
+
+`.env.example` をコピーして、プロジェクト直下の `.env.local` に値を設定します。
 
 ```bash
-npm install
+cp .env.example .env.local
+```
+
+| 変数名 | 公開範囲 | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | ブラウザ・サーバー | 必須 | Supabase の Project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | ブラウザ・サーバー | 必須 | Supabase の匿名キー（publishable / anon key） |
+| `YOUTUBE_API_KEY` | サーバーのみ | 必須 | YouTube Data API v3 の API キー |
+| `GEMINI_API_KEY` | サーバーのみ | 必須 | Gemini API キー |
+| `GEMINI_MODEL` | サーバーのみ | 必須 | 公開 YouTube URL 入力に対応した記事生成モデル |
+| `GEMINI_IMAGE_MODEL` | サーバーのみ | 画像生成に必須 | 画像出力に対応した Gemini モデル |
+
+設定例（値は各サービスで取得したものに置き換えてください）:
+
+```dotenv
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+YOUTUBE_API_KEY=
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-3.8-flash
+GEMINI_IMAGE_MODEL=
+```
+
+`YOUTUBE_API_KEY` と `GEMINI_API_KEY` に `NEXT_PUBLIC_` を付けないでください。`NEXT_PUBLIC_` 付きの値はブラウザ向け JavaScript に含まれます。また、`SUPABASE_SERVICE_ROLE_KEY` はこのアプリでは使用せず、`.env.local` にも設定しません。`.env.local` は Git の追跡対象外です。
+
+環境変数を変更したときは、開発サーバーを再起動してください。
+
+## コマンド一覧
+
+| コマンド | 内容 |
+| --- | --- |
+| `npm ci` | lockfile に固定された依存パッケージを再現可能な形でインストール |
+| `npm install` | 依存パッケージをインストール・更新 |
+| `npm run dev` | 開発サーバーを起動（`http://localhost:3000`） |
+| `npm run lint` | ESLint による静的解析 |
+| `npm run build` | 本番用ビルドを作成 |
+| `npm run start` | ビルド済みアプリを本番モードで起動 |
+| `npx supabase login` | Supabase CLI にログイン |
+| `npx supabase link --project-ref <PROJECT_REF>` | ローカルと Supabase プロジェクトを接続 |
+| `npx supabase db push` | `supabase/migrations/` の未適用マイグレーションを反映 |
+| `node scripts/generate-pagination-layout-checks.mjs` | PDF のページ送り・見出し配置の確認用 PDF を生成 |
+| `node scripts/generate-section-layout-check.mjs` | PDF の本文セクション配置の確認用 PDF を生成 |
+| `node scripts/generate-small-kana-layout-check.mjs` | 縦書き小書き仮名の確認用 PDF を生成 |
+
+## ディレクトリ構成
+
+```text
+yomutube/
+├── app/
+│   ├── api/
+│   │   ├── magazines/              # 雑誌の生成・取得・再生成・画像生成 API
+│   │   └── youtube/video/          # YouTube 動画情報の確認 API
+│   ├── globals.css                 # グローバルスタイル
+│   ├── layout.js                   # ルートレイアウト
+│   ├── page.js                     # メイン画面と画面遷移
+│   └── page.module.css             # メイン画面のスタイル
+├── lib/
+│   ├── magazine-validation.js      # 記事 JSON の Zod スキーマと検証
+│   ├── supabase-request.js         # API 側の匿名ユーザー認証
+│   ├── yomazine-pdf.js             # 縦書き PDF の組版・生成
+│   └── youtube-video.js            # URL 解析と YouTube API 呼び出し
+├── public/
+│   └── fonts/                      # PDF に埋め込む Noto Sans/Serif JP
+├── scripts/                        # PDF レイアウト確認用スクリプト
+├── supabase/
+│   └── migrations/                 # DB、RLS、保存期限 Cron の SQL
+├── output/pdf/                     # レイアウト確認スクリプトの出力先
+├── .env.example                    # 環境変数のひな形
+├── next.config.mjs                 # Next.js 設定
+├── supabase.js                     # ブラウザ用 Supabase クライアント
+├── package.json                    # 依存関係と npm scripts
+└── README.md
+```
+
+## 開発環境の構築方法
+
+### 1. リポジトリと依存パッケージを準備する
+
+```bash
+git clone <REPOSITORY_URL>
+cd yomutube
+npm ci
+cp .env.example .env.local
+```
+
+### 2. YouTube Data API v3 を設定する
+
+1. [Google Cloud Console](https://console.cloud.google.com/) でプロジェクトを作成します。
+2. **API とサービス → ライブラリ** で YouTube Data API v3 を有効にします。
+3. **API とサービス → 認証情報** で API キーを発行します。
+4. キーの **API の制限** を YouTube Data API v3 のみに設定します。
+5. キーを `.env.local` の `YOUTUBE_API_KEY` に設定します。
+
+詳細は [YouTube Data API の概要](https://developers.google.com/youtube/v3/getting-started) と [Google Cloud の API キー制限ガイド](https://docs.cloud.google.com/docs/authentication/api-keys) を参照してください。
+
+### 3. Gemini API を設定する
+
+1. Google AI Studio で API キーを発行します。
+2. `.env.local` の `GEMINI_API_KEY` に設定します。
+3. 公開 YouTube URL 入力に対応するモデルを `GEMINI_MODEL` に設定します。
+4. 画像出力に対応するモデルを `GEMINI_IMAGE_MODEL` に設定します。
+
+`GEMINI_IMAGE_MODEL` が未設定、または画像生成に失敗した場合でも、記事生成と画像なしの PDF 作成は利用できます。
+
+### 4. Supabase を設定する
+
+1. Supabase でプロジェクトを作成します。
+2. Dashboard の **Authentication → Providers → Anonymous** で匿名サインインを有効にします。
+3. Dashboard の **Integrations → Cron** で pg_cron を有効にします。
+4. Project URL と匿名キーを `.env.local` の `NEXT_PUBLIC_SUPABASE_URL`、`NEXT_PUBLIC_SUPABASE_ANON_KEY` に設定します。
+5. マイグレーションを適用します。
+
+```bash
+npx supabase login
+npx supabase link --project-ref <PROJECT_REF>
+npx supabase db push
+```
+
+CLI を使わない場合は、Supabase の SQL Editor で `supabase/migrations/` 内の SQL 4 ファイルをファイル名順に実行してください。保存期限 Cron を作成する `202609100002_schedule_retention_cleanup.sql` は、pg_cron の有効化後に実行します。
+
+### 5. アプリを起動して確認する
+
+```bash
 npm run dev
 ```
 
-ブラウザで `http://localhost:3000` を開きます。
+ブラウザで `http://localhost:3000` を開き、次を確認します。
 
-## YouTube Data API v3 の設定
-
-動画情報を取得するには Google アカウントが必要です。API キーはブラウザへ送らず、Next.js の Route Handler だけが使います。
-
-1. [Google Cloud Console](https://console.cloud.google.com/) を開き、Google アカウントでログインします。
-2. 画面上部のプロジェクト選択から **新しいプロジェクト** を選び、分かりやすい名前（例: `yomazine`）を入力して **作成** します。作成後、そのプロジェクトが選択されていることを確認します。
-3. 左上のメニューから **API とサービス → ライブラリ** を開き、`YouTube Data API v3` を検索します。詳細画面で **有効にする** を選びます。
-4. **API とサービス → 認証情報** を開き、上部の **認証情報を作成 → API キー** を選びます。表示されたキーをコピーします。
-5. 同じ画面で作成したキーの名前を選び、**API の制限** を **キーを制限** にします。`YouTube Data API v3` だけを選んで **保存** します。これにより、そのキーを他の Google API に使えなくできます。
-6. プロジェクト直下の `.env.local` を開き、次の `=` の後ろにキーを貼り付けます。引用符は不要です。
-
-   ```bash
-   YOUTUBE_API_KEY=ここにコピーしたAPIキーを貼り付ける
-   ```
-
-7. `.env.local` を保存したら、起動中の `npm run dev` を `Ctrl + C` で止めて、もう一度 `npm run dev` を実行します。環境変数は開発サーバーの起動時に読み込まれるため、再起動が必要です。
-
-YouTube Data API v3 は、Google Cloud プロジェクトで API を有効化してから利用します。利用量は Cloud Console の **API とサービス → 有効な API とサービス → YouTube Data API v3 → 割り当て** で確認できます。[YouTube の公式概要](https://developers.google.com/youtube/v3/getting-started) と [Google Cloud の API キー制限ガイド](https://docs.cloud.google.com/docs/authentication/api-keys) も参照してください。
-
-### API キーを公開しない理由
-
-API キーを GitHub に公開すると、第三者があなたの割り当て（クォータ）を使い切ったり、許可された API をあなたのプロジェクトとして呼び出したりする可能性があります。`.env.local` は `.gitignore` で除外済みです。キーは README、ソースコード、スクリーンショット、コミットに書かないでください。誤って公開した場合は、Cloud Console でそのキーを削除または再生成し、新しいキーに差し替えます。
-
-このアプリでは `YOUTUBE_API_KEY` をサーバー専用の環境変数として使用します。`NEXT_PUBLIC_YOUTUBE_API_KEY` は作成しないでください。
-
-## 動画の確認方法
-
-1. トップ画面の **雑誌をつくる** を選びます。
-2. 公開されている通常動画の URL を貼り、**動画を確認する** を選びます。
-3. 成功すると、サムネイル、タイトル、チャンネル名、再生時間が表示されます。
-4. URL を編集すると確認結果は破棄され、**雑誌の構成をつくる** は再確認するまで選べなくなります。
-5. 知りたいことを入力し、読書時間と同意を選ぶと、確認済みの動画タイトル・チャンネル名・再生時間が従来の Supabase 履歴保存処理へ渡されます。
-
-受け付ける URL は次の形式です。末尾に `utm_source` や `si` などの追跡パラメータが付いていてもかまいません。
-
-```text
-https://www.youtube.com/watch?v=VIDEO_ID
-https://youtu.be/VIDEO_ID
-```
-
-次のものは画面で拒否します。
-
-- URL の形式が違う、または動画 ID を取り出せないもの
-- `https://www.youtube.com/shorts/...` 形式
-- `list=` パラメータを含む再生リスト URL
-- 非公開、削除済み、存在しない動画
-- ライブ中・配信予定の動画
-- 60 分を超える動画
-
-### 動作確認の例
-
-| 確認したい内容 | 操作 | 期待する結果 |
-| --- | --- | --- |
-| 通常動画 | 例として `https://www.youtube.com/watch?v=dQw4w9WgXcQ` を貼る | 動画情報カードが表示される |
-| 短尺 URL | `https://www.youtube.com/shorts/dQw4w9WgXcQ` を貼る | Shorts は対象外というエラーが URL 欄の下に表示される |
-| ライブ／配信予定 | YouTube のライブ中または配信予定ページで **共有** から通常の `watch?v=` URL をコピーして貼る | ライブ配信・配信予定は雑誌にできないというエラーが表示される |
-| 60 分超 | 60 分を超える公開通常動画の `watch?v=` URL を貼る | 60 分以内の動画を選ぶよう案内される |
-| URL 編集後 | 正常な動画を確認してから URL 欄を1文字編集する | 動画カードが消え、生成ボタンが無効になる |
-
-### Shorts の制約
-
-`/shorts/` 形式の URL は、URL を解析する段階で確実に拒否します。
-
-ただし YouTube Data API v3 には「この動画は Shorts である」と示す専用の確実な項目がありません。そのため、Shorts を通常の `watch?v=` URL として貼り付けた場合、Shorts だと 100% 判定して拒否することはできません。この制約は [実装メモ](./実装メモ_YouTube動画情報取得.md) にも記載しています。
-
-### エラー時の対処
-
-- **動画が見つからない**: 公開済みの通常動画 URL か、動画が削除・非公開になっていないかを確認します。
-- **API キー未設定**: `.env.local` の `YOUTUBE_API_KEY=` の値を確認し、開発サーバーを再起動します。
-- **YouTube API の利用上限**: Cloud Console の **割り当て** で使用量を確認し、リセット後に再試行します。必要なら YouTube API Services のクォータ増量申請を検討します。
-- **取得できない**: ネットワークや一時的な API エラーの可能性があります。少し時間を置いて再試行します。技術的な API エラー本文は画面に表示しません。
-
-## Supabase の設定と履歴確認
-
-アプリは起動時に Supabase Auth の匿名サインインを行います。匿名ユーザーは Supabase 上では `authenticated` ロールになり、RLS によって自分の履歴だけを読み書きできます。
-
-1. Supabase プロジェクトを作成し、Dashboard の **Authentication → Providers → Anonymous** で **Enable Anonymous Sign-Ins** を有効にします。
-2. Dashboard の **Integrations → Cron** で pg_cron を有効にします。
-3. Supabase CLI を使う場合は、プロジェクト直下で次を実行します。初回はブラウザで認証を完了します。
-
-   ```bash
-   npx supabase login
-   npx supabase link --project-ref <SupabaseのProject Ref>
-   npx supabase db push
-   ```
-
-   `supabase/migrations/202609100001_create_yomazine_schema.sql`（テーブル・RLS・削除関数）、`supabase/migrations/202609100002_schedule_retention_cleanup.sql`（毎日00:15 JST の削除 Cron）、`supabase/migrations/202609110001_fix_video_url_constraint.sql`（有効な YouTube URL を保存できるようにする修正）、`supabase/migrations/202609110002_expand_generation_failure_codes.sql`（Geminiの固定失敗コード）が順に適用されます。
-
-   CLI を使わない場合は、SQL Editor で上記3ファイルを番号順に実行します。2本目は pg_cron 有効化後に実行します。
-4. `.env.example` を参考に、以下を `.env.local` に設定して開発サーバーを再起動します。
-
-   ```bash
-   NEXT_PUBLIC_SUPABASE_URL=
-   NEXT_PUBLIC_SUPABASE_ANON_KEY=
-   YOUTUBE_API_KEY=
-   GEMINI_API_KEY=
-   GEMINI_MODEL=gemini-3.8-flash
-   GEMINI_IMAGE_MODEL=
-   ```
-
-   `NEXT_PUBLIC_` を付けるのは Supabase の URL と匿名キーだけです。YouTube・Gemini キー、`SUPABASE_SERVICE_ROLE_KEY` は絶対にブラウザへ渡しません。
-
-履歴確認では、雑誌を作成してヘッダーの **履歴** から自分の1冊だけが表示されることを確認します。再生成すると同じ雑誌の `magazine_versions` に新しい版が保存されます。通常ブラウザとシークレットウィンドウでは匿名ユーザーが別になるため、互いの履歴は表示されません。
-
-成功履歴は匿名ユーザーごとに90日間保存します。失敗・中断した生成版は24時間後に削除され、PDF、AI画像、動画・音声・字幕、生の AI 応答は保存しません。
-
-## Gemini 記事生成の設定
-
-記事の生成は `POST /api/magazines/generate` からだけ実行します。ブラウザは確認済み動画のスナップショットを送りますが、Route HandlerはYouTube Data API v3で動画ID・正規化URL・タイトル・チャンネル名・再生時間をもう一度確認し、サーバー側の情報だけを保存・Gemini入力に使います。
-
-`.env.local` に次を設定して、開発サーバーを再起動してください。
-
-```bash
-GEMINI_API_KEY=AIStudioで作成したGemini_APIキー
-GEMINI_MODEL=gemini-3.8-flash
-```
-
-`GEMINI_API_KEY` と `GEMINI_MODEL` はRoute Handlerだけが読むサーバー専用設定です。`NEXT_PUBLIC_GEMINI_API_KEY` は作成しないでください。指定するモデルは、公開YouTube URLを入力として扱えるGeminiモデルにしてください。Geminiの返却はリクエスト中のメモリでJSONとして解析し、Zodの必須フィールド・配列数・項目別文字数・読書時間別の総文字数の検証を通過した場合だけ `succeeded` 版へ保存します。
-
-## Gemini AI画像生成の設定
-
-記事生成後、`POST /api/magazines/[id]/illustrations` が表紙用・本文用のオリジナルイラストを生成します。`.env.local` の `GEMINI_IMAGE_MODEL` に、画像出力をサポートするGeminiモデル名を設定してください。画像データはRoute Handlerのレスポンスとブラウザのプレビュー内だけに置き、Supabase・Storage・履歴には保存しません。画像生成に失敗しても記事と履歴はそのまま利用でき、プレビューから画像だけ再生成できます。
-
-## PDFを作る
-
-1. 記事のプレビュー画面の最後で、年号の表示（原文のまま／漢数字）を選びます。初期設定は原文のままです。
-2. **この内容でPDFを作る** を選びます。ボタンが **PDFを作成中…** に変わり、処理中はもう一度選べません。
-3. 記事量に応じた最大10ページのA4縦書きPDFが完成すると、ブラウザが `yomazine-YYYY-MM-DD.pdf` を自動でダウンロードし、完了画面へ進みます。短い記事は10ページ未満で完結します。
-
-通常、ダウンロードしたPDFはブラウザの **ダウンロード** フォルダに入ります。PDFには日本語フォント（Noto Serif JP）を埋め込むため、開くPCに同じフォントがなくても文字化けしません。縦書きでは、1～2桁の数字を縦中横にし、長い数値・欧文・URL・メールアドレス・型番は意味のまとまりを保って時計回りに90度回転します。長いURLなどはスラッシュ、ドット、ハイフン等でのみ折り返します。
-
-PDFにはYouTubeのサムネイル、動画フレーム、切り抜きは使いません。使う画像は、その場で生成したAIイラストだけです。AI画像が生成できなかった場合も、黄緑の図形と余白を使う代替レイアウトでPDFを作れます。PDF本体とAI画像データはSupabase、Supabase Storage、履歴へ保存されず、PDFはブラウザ内で作ってすぐダウンロードします。
-
-履歴から開いた記事では、保存されていないAI画像をプレビュー表示時にあらためて生成します。画像の生成が終わる前や失敗した場合も、代替レイアウトでPDFを作成できます。
-
-### ダウンロードが始まらないとき
-
-- ブラウザがダウンロードをブロックしていないか、アドレスバー付近のダウンロード許可表示を確認します。
-- ポップアップ／自動ダウンロードの許可が求められた場合は、このサイトを許可してからもう一度選びます。
-- ブラウザのダウンロード一覧（Chromeなら右上のダウンロードアイコン）を確認します。
-
-PDF作成に失敗したときは、プレビュー画面に留まり **PDFを作成できませんでした。もう一度お試しください。** と表示されます。ネットワークを確認して、同じボタンから再試行できます。記事量が最大10ページに収まらない場合は、内容を省略せず **記事が長いため、もう一度生成してください。** と案内されるので、記事を再生成してください。
-
-## 品質確認
+1. 公開されている 60 分以内の通常動画 URL を入力し、動画情報を確認します。
+2. 「知りたいこと」、読書時間、同意を入力して記事を生成します。
+3. プレビューと履歴を確認し、PDF をダウンロードします。
+4. 変更を提出する前に品質チェックを実行します。
 
 ```bash
 npm run lint
 npm run build
 ```
+
+## トラブルシューティング
+
+### 環境変数を設定したのに反映されない
+
+- `.env.local` が `package.json` と同じ階層にあるか確認してください。
+- 変数名のタイプミスや値の前後の不要な空白を確認してください。
+- `npm run dev` を `Ctrl + C` で停止し、再起動してください。
+- 秘密鍵に `NEXT_PUBLIC_` を付けて解決しようとしないでください。
+
+### 動画情報を取得できない
+
+- URL が通常動画の `watch?v=` または `youtu.be/` 形式か確認してください。
+- `/shorts/`、`list=` を含む再生リスト、ライブ中・配信予定、非公開・削除済み、60 分超の動画は対象外です。
+- Google Cloud で YouTube Data API v3 が有効か、API キーが同 API に許可されているか確認してください。
+- Cloud Console の **割り当て** でクォータを確認してください。
+- YouTube Data API には Shorts を示す確実な専用項目がないため、Shorts を通常の `watch?v=` URL で入力した場合は判定できないことがあります。
+
+### 匿名サインインまたは履歴保存に失敗する
+
+- `NEXT_PUBLIC_SUPABASE_URL` と `NEXT_PUBLIC_SUPABASE_ANON_KEY` を確認してください。
+- Supabase の Anonymous Sign-Ins が有効か確認してください。
+- `supabase/migrations/` の 4 ファイルがすべて適用済みか確認してください。
+- 通常ウィンドウとシークレットウィンドウは別の匿名ユーザーになるため、履歴は共有されません。
+
+### 記事を生成できない
+
+- `GEMINI_API_KEY` と `GEMINI_MODEL` を確認し、開発サーバーを再起動してください。
+- `GEMINI_MODEL` が公開 YouTube URL を入力として扱えるモデルか確認してください。
+- 対象動画が Gemini から参照可能な公開動画か確認してください。
+- Gemini の一時的な障害や利用上限の場合は、時間を置いて再試行してください。
+
+### イラストを生成できない
+
+- `GEMINI_IMAGE_MODEL` が画像出力対応モデルか確認してください。
+- イラスト生成だけを再試行できます。失敗したままでも代替レイアウトで PDF を作成できます。
+- 生成画像は履歴に保存されないため、履歴から記事を開くたびに再生成されます。
+
+### PDF のダウンロードが始まらない
+
+- ブラウザのダウンロード許可、ポップアップ／自動ダウンロード設定を確認してください。
+- ブラウザのダウンロード一覧を確認してください。
+- 記事が最大 10 ページに収まらない場合は、省略せずエラーにする仕様です。記事を再生成してください。
+- PDF 作成中に失敗した場合は、プレビュー画面から再試行してください。
+
+### ビルドに失敗する
+
+- Node.js が 20.9 以上か `node -v` で確認してください。
+- `npm ci` を再実行して、`package-lock.json` と依存関係を揃えてください。
+- 先に `npm run lint` を実行し、表示されたファイルと行を修正してください。
+- ビルド時に必要な環境変数が設定されているか確認してください。
+
+## データとセキュリティ
+
+- YouTube と Gemini の API キーは Route Handler だけが使用します。
+- Route Handler は、ブラウザから受け取った動画情報を信用せず、YouTube Data API で再検証します。
+- 匿名ユーザーは Supabase 上で `authenticated` ロールとなり、RLS により自分の履歴だけを読み書きできます。
+- 検証済みの記事 JSON と動画情報は 90 日間保存します。失敗・中断した生成版は 24 時間後に削除します。
+- 動画・音声・字幕、Gemini の生レスポンス、AI 画像、PDF、行動分析ログは保存しません。
+- API キーを誤って公開した場合は、対象サービスで直ちにキーを無効化・再発行してください。
+
+詳細仕様は [要件定義書_Yomazine.md](./要件定義書_Yomazine.md)、[データ設計書_Yomazine.md](./データ設計書_Yomazine.md)、[画面設計書_Yomazine.md](./画面設計書_Yomazine.md)、[YouTube 動画情報取得の実装メモ](./実装メモ_YouTube動画情報取得.md) を参照してください。
